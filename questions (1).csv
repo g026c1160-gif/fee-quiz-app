@@ -1,0 +1,3 @@
+﻿year,question_text,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation
+令和5年 公開問題,無線LANにおいて、アクセスポイントが作成するネットワークの識別子は何？,ESSID,MACアドレス,IPアドレス,デフォルトゲートウェイ,ア,ESSIDは無線LANのネットワークを識別する文字列です。
+令和4年 公開問題,売上高から売上原価を引いたものは？,営業利益,売上総利益,経常利益,純利益,イ,売上高 - 売上原価 = 売上総利益（粗利）です。
