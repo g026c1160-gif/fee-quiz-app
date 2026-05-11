@@ -1,8 +1,3 @@
-お待たせしました。CSVの1行目もデータとして正しくカウントし、問題数がずれないように修正した全コードです。
-
-このコードでは `pd.read_csv` に `header=None` を追加し、手動で列名を定義することで、1問目も漏らさず読み込むようにしています。
-
-```python
 import streamlit as st
 import pandas as pd
 import random
@@ -149,5 +144,3 @@ else:
         if st.button("次の問題へ ➡️"):
             st.session_state.current_question = None
             st.rerun()
-
-```
