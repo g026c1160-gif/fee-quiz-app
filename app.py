@@ -2,55 +2,49 @@ import streamlit as st
 import pandas as pd
 import random
 
-# ページの設定
-st.set_page_config(page_title="FE過去問道場（重複なし版）", layout="centered")
+st.set_page_config(page_title="FE過去問道場（全問対応版）", layout="centered")
 
-# データの読み込み
-@st.cache_data
+# キャッシュをあえて使わず、毎回読み込む設定に変更
 def load_data():
     df = pd.read_csv("questions.csv")
     return df
 
 df = load_data()
+total_questions = len(df) # ここでCSVの行数を数えています
 
-# セッション状態（メモ帳）の初期化
 if "solved_indices" not in st.session_state:
-    st.session_state.solved_indices = []  # 解き終わった問題の番号を記録するリスト
+    st.session_state.solved_indices = []
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
-if "show_explanation" not in st.session_state:
-    st.session_state.show_explanation = False
 
-# 次の問題を選ぶ関数
 def next_question():
-    # まだ解いていない問題のインデックス（番号）を探す
     remaining_indices = [i for i in df.index if i not in st.session_state.solved_indices]
     
     if not remaining_indices:
-        st.warning("全問題を解き終わりました！記録をリセットします。")
+        st.balloons() # 全問解いたら風船を飛ばす演出！
+        st.success(f"おめでとうございます！全 {total_questions} 問を解き終わりました！")
         st.session_state.solved_indices = []
         remaining_indices = list(df.index)
     
-    # 残っている問題からランダムに1つ選ぶ
     next_idx = random.choice(remaining_indices)
     st.session_state.current_question = df.iloc[next_idx]
-    st.session_state.current_idx = next_idx # 現在の問題番号を保持
+    st.session_state.current_idx = next_idx
     st.session_state.show_explanation = False
 
-# 初回起動時
 if st.session_state.current_question is None:
     next_question()
 
 q = st.session_state.current_question
 
-# 表示部分
 st.title("🛡️ FE過去問道場")
-st.caption(f"進捗: {len(st.session_state.solved_indices)} / {len(df)} 問完了")
+# 進捗状況を常に表示
+st.write(f"進捗: **{len(st.session_state.solved_indices)} / {total_questions}** 問完了")
+st.progress(len(st.session_state.solved_indices) / total_questions)
 
 st.info(f"**{q['year']}**")
 st.write(q['question_text'])
 
-# 選択肢ボタン
+# 選択肢ボタン（以下、前回と同じ）
 col1, col2 = st.columns(2)
 with col1:
     if st.button(f"ア：{q['choice_a']}", use_container_width=True):
@@ -63,9 +57,7 @@ with col2:
     if st.button(f"エ：{q['choice_d']}", use_container_width=True):
         st.session_state.show_explanation = True
 
-# 解説表示
-if st.session_state.show_explanation:
-    # 今の問題を「解いたリスト」に追加
+if st.session_state.get("show_explanation", False):
     if st.session_state.current_idx not in st.session_state.solved_indices:
         st.session_state.solved_indices.append(st.session_state.current_idx)
     
@@ -76,7 +68,6 @@ if st.session_state.show_explanation:
         next_question()
         st.rerun()
 
-# 記録のリセットボタン（サイドバー）
 if st.sidebar.button("学習記録をリセット"):
     st.session_state.solved_indices = []
     next_question()
