@@ -98,7 +98,7 @@ st.title("🛡️ FE過去問道場 (20問演習)")
 
 if not st.session_state.current_set:
     st.info("サイドバーの「新しい20問セットを開始」ボタンを押すとスタートします。")
-elif not st.session_state.current_question and len(st.session_state.solved_in_set) >= len(st.session_state.current_set):
+elif st.session_state.current_question is None and len(st.session_state.solved_in_set) >= len(st.session_state.current_set):
     st.balloons()
     st.success(f"セット完了！ {len(st.session_state.current_set)}問中 {len(st.session_state.current_set)}問解きました。")
     if st.button("次のセットへ"):
