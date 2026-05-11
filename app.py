@@ -5,7 +5,7 @@ import random
 st.set_page_config(page_title="FE過去問道場（年度選択版）", layout="centered")
 
 def load_data():
-    # 修正点はここだけです：header=Noneで1行目から読み込み、namesで列名を割り当てます
+    # 修正点はここだけです：header=Noneで1行目も読み込み、namesで列名を割り当て
     df = pd.read_csv("questions.csv", header=None, names=[
         'year', 'question_text', 'correct_answer', 
         'choice_a', 'choice_b', 'choice_c', 'choice_d', 'explanation'
@@ -31,7 +31,7 @@ def next_question(filtered_df):
     if st.session_state.mode == "復習":
         target_indices = [i for i in filtered_df.index if i in st.session_state.wrong_indices]
         if not target_indices:
-            st.warning("この年度の復習対象（間違えた問題）はありません。通常モードに切り替えます。")
+            st.warning("この年度の復習対象はありません。通常モードに切り替えます。")
             st.session_state.mode = "通常"
             target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
     else:
@@ -39,12 +39,12 @@ def next_question(filtered_df):
 
     if not target_indices:
         if st.session_state.mode == "復習":
-            st.success("復習対象をすべて解きました！通常モードに戻ります。")
+            st.success("復習完了！通常モードに戻ります。")
             st.session_state.mode = "通常"
             st.rerun()
         else:
             st.balloons()
-            st.success("選択した年度の問題をすべて解き終わりました！記録をリセットします。")
+            st.success("全問解き終わりました！記録をリセットします。")
             st.session_state.solved_indices = []
             st.session_state.current_question = None
             st.rerun()
@@ -76,7 +76,6 @@ if new_mode != st.session_state.mode:
     st.session_state.current_question = None 
     st.rerun()
 
-# フィルタリング
 filtered_df = df[df['year_group'].isin(selected_years)]
 
 if st.sidebar.button("学習記録をリセット"):
@@ -87,7 +86,7 @@ if st.sidebar.button("学習記録をリセット"):
 
 # --- メインロジック ---
 if not selected_years:
-    st.warning("サイドバーから年度を1つ以上選択してください。")
+    st.warning("年度を選択してください。")
 else:
     if st.session_state.current_question is None or \
        st.session_state.current_question['year_group'] not in selected_years:
@@ -99,9 +98,9 @@ else:
     st.title("🛡️ FE過去問道場")
     
     if st.session_state.mode == "通常":
-        st.write(f"📊 通常モード進捗: {len(st.session_state.solved_indices)} / {len(filtered_df)} 問完了")
+        st.write(f"📊 進捗: {len(st.session_state.solved_indices)} / {len(filtered_df)} 問")
     else:
-        st.write(f"📝 復習モード: 残り {len([i for i in st.session_state.wrong_indices if i in filtered_df.index])} 問")
+        st.write(f"📝 復習: 残り {len([i for i in st.session_state.wrong_indices if i in filtered_df.index])} 問")
 
     st.info(f"**{q['year']}**")
     st.subheader(q['question_text'])
