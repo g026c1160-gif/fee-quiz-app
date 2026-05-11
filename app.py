@@ -5,7 +5,6 @@ import random
 # --- 1. データの読み込み ---
 @st.cache_data
 def load_data():
-    # 列名を固定せず、順番（インデックス）で制御します
     df = pd.read_csv('questions.csv', header=None)
     return df
 
@@ -24,7 +23,6 @@ if 'last_mode' not in st.session_state:
 # --- 3. サイドバー設定 ---
 st.sidebar.title("🛠️ 設定")
 
-# 年度（0番目の列）を取得
 all_years = sorted(df[0].unique().tolist(), reverse=True)
 selected_years = st.sidebar.multiselect("解きたい年度を選択", options=all_years, default=all_years)
 
@@ -35,7 +33,8 @@ if st.session_state.last_mode != selected_mode:
     st.session_state.current_question = None
     st.rerun()
 
-st.sidebar.write(f"現在の復習対象: **{len(st.session_state.wrong_indices)}** 問")
+st.sidebar.divider() # 区切り線
+st.sidebar.write(f"📁 現在の復習対象: **{len(st.session_state.wrong_indices)}** 問")
 
 if st.sidebar.button("学習記録をリセット"):
     st.session_state.solved_indices = []
@@ -43,70 +42,65 @@ if st.sidebar.button("学習記録をリセット"):
     st.session_state.current_question = None
     st.rerun()
 
-# --- 4. 出題ロジック ---
-# 年度でフィルタリング
+# --- 4. 出題ロジック & 進捗計算 ---
 filtered_df = df[df[0].isin(selected_years)]
+total_in_scope = len(filtered_df) # 選択された年度の総問題数
 
 if selected_mode == "復習":
     target_indices = [i for i in st.session_state.wrong_indices if i in filtered_df.index]
+    progress_count = len(st.session_state.wrong_indices) # 復習は残り件数
     if not target_indices:
         st.info("復習対象がありません。")
         st.stop()
 else:
     target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
+    # 現在の進捗（解いた数）
+    solved_in_scope = [i for i in st.session_state.solved_indices if i in filtered_df.index]
+    progress_count = len(solved_in_scope)
+    
     if not target_indices:
-        st.success("全ての対象問題を解き終わりました！")
-        if st.button("リセット"):
+        st.success("🎉 全ての対象問題を解き終わりました！")
+        if st.button("リセットして最初から"):
             st.session_state.solved_indices = []
             st.rerun()
         st.stop()
 
+# 進捗バーの表示
+if selected_mode == "通常":
+    progress_percent = progress_count / total_in_scope
+    st.write(f"📊 **進捗: {progress_count} / {total_in_scope} 問** ({int(progress_percent * 100)}%)")
+    st.progress(progress_percent)
+else:
+    st.write(f"📝 **復習残り: {len(target_indices)} 問**")
+
+# 新しい問題のセット
 if st.session_state.current_question is None:
     idx = random.choice(target_indices)
     row = df.loc[idx]
     
-    # 【最重要】CSVの列順に基づいてデータを整理
-    # 0:年度, 1:問題文, 2:正解(文または記号), 3:選択2, 4:選択3, 5:選択4, 6:解説
-    
-    # 選択肢の文章だけをリスト化（2〜5列目）
+    # 選択肢整理（文章のみを抽出）
     raw_choices = [str(row[2]), str(row[3]), str(row[4]), str(row[5])]
+    final_choices = [c for c in raw_choices if c.strip() not in ["ア", "イ", "ウ", "エ"]]
     
-    # もし2列目が「ア」「イ」「ウ」「エ」なら、文章へのマッピングを行う
-    mapping = {"ア": 3, "イ": 4, "ウ": 5, "エ": 6} 
-    # ※記号形式のCSVの場合、3列目以降に文章がずれている可能性があるための処理
-    
-    correct_ans = str(row[2])
-    # 選択肢の中に「ア」などが一文字で存在する場合のみ、それは無視して文章を選ぶ
-    final_choices = []
-    for c in raw_choices:
-        if c.strip() not in ["ア", "イ", "ウ", "エ"]:
-            final_choices.append(c)
-    
-    # もし文章が足りない（2列目が記号だった）場合は、3〜6列目から文章を取る
     if len(final_choices) < 4:
         final_choices = [str(row[3]), str(row[4]), str(row[5]), str(row[6])]
-        # 正解を記号から文章に変換
         symbol_map = {"ア": str(row[3]), "イ": str(row[4]), "ウ": str(row[5]), "エ": str(row[6])}
         correct_ans = symbol_map.get(str(row[2]).strip(), str(row[2]))
-        hint_text = str(row[7]) # ずれている場合は7列目が解説
+        hint_text = str(row[7])
     else:
-        hint_text = str(row[6]) # 通常は6列目が解説
+        correct_ans = str(row[2])
+        hint_text = str(row[6])
 
     random.shuffle(final_choices)
-    
     st.session_state.current_question = {
-        'index': idx,
-        'year': row[0],
-        'text': row[1],
-        'correct_ans': correct_ans,
-        'choices': final_choices,
-        'hint': hint_text
+        'index': idx, 'year': row[0], 'text': row[1],
+        'correct_ans': correct_ans, 'choices': final_choices, 'hint': hint_text
     }
 
 # --- 5. クイズ画面表示 ---
 q = st.session_state.current_question
-
-st.caption(f"📅 {q['year']} | No.{q['index']}")
+st.divider()
+st.caption(f"📅 {q['year']} | 管理番号: {q['index']}")
 st.markdown(f"### {q['text']}")
 
 answer = st.radio("選択肢を選んでください", q['choices'], key=f"q_{q['index']}")
