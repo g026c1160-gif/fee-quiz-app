@@ -4,28 +4,28 @@ import random
 import os
 import glob
 
-# --- 1. データの自動集約読み込み ---
+# --- 1. データの自動集約読み込み (超・強化版) ---
 @st.cache_data(show_spinner=False)
 def load_all_data():
-    # 'data' フォルダ内の全CSVファイルを探す
-    path = "data"
-    if not os.path.exists(path):
-        os.makedirs(path) # フォルダがなければ作成
-        
-    all_files = glob.glob(os.path.join(path, "*.csv"))
-    
-    if not all_files:
-        # ファイルが一つもない場合のダミー
-        return pd.DataFrame([["データなし", "dataフォルダにCSVを入れてください", "A", "B", "C", "D", "ヒント"]])
-    
-    # 全てのCSVを読み込んで一つに結合
     df_list = []
-    for filename in all_files:
-        # headerなしで読み込み
-        temp_df = pd.read_csv(filename, header=None)
-        df_list.append(temp_df)
     
-    combined_df = pd.concat(df_list, axis=0, ignore_index=True)
+    # パターン1: 今まで通りの 'questions.csv' があれば読み込む
+    if os.path.exists('questions.csv'):
+        df_list.append(pd.read_csv('questions.csv', header=None))
+    
+    # パターン2: 'data' フォルダ内の全CSVを読み込む
+    path = "data"
+    if os.path.exists(path):
+        all_files = glob.glob(os.path.join(path, "*.csv"))
+        for filename in all_files:
+            df_list.append(pd.read_csv(filename, header=None))
+    
+    # どちらも無い場合
+    if not df_list:
+        return pd.DataFrame([["データなし", "CSVファイルが見つかりません。設定を確認してください。", "A", "B", "C", "D", "ヒント"]])
+    
+    # 全てを合体
+    combined_df = pd.concat(df_list, axis=0, ignore_index=True).drop_duplicates()
     return combined_df
 
 df = load_all_data()
@@ -40,13 +40,12 @@ if 'last_mode' not in st.session_state:
 # --- 3. サイドバー設定 ---
 st.sidebar.title("🛠️ 試験対策設定")
 
-# 読み込まれている年代を自動取得
+# 読み込まれている年度を自動取得
 all_years = sorted(df[0].unique().tolist(), reverse=True)
 selected_years = st.sidebar.multiselect("解きたい年代を選択", options=all_years, default=all_years)
 
 selected_mode = st.sidebar.radio("学習モード", ["通常", "復習"])
 
-# モード切替時のリセット
 if st.session_state.last_mode != selected_mode:
     st.session_state.last_mode = selected_mode
     st.session_state.current_question = None
@@ -68,7 +67,7 @@ total_in_scope = len(filtered_df)
 if selected_mode == "復習":
     target_indices = [i for i in st.session_state.wrong_indices if i in filtered_df.index]
     if not target_indices:
-        st.info("この条件の復習対象はありません。")
+        st.info("復習対象はありません。")
         st.stop()
     st.write(f"📝 **復習残り: {len(target_indices)} 問**")
 else:
@@ -76,7 +75,7 @@ else:
     solved_in_scope = [i for i in st.session_state.solved_indices if i in filtered_df.index]
     
     if not target_indices:
-        st.success("🎉 選択した年代の問題をすべて解きました！")
+        st.success("🎉 全問クリア！")
         if st.button("もう一度最初から"):
             st.session_state.solved_indices = []
             st.rerun()
@@ -87,23 +86,20 @@ else:
     st.write(f"📊 **進捗: {progress_count} / {total_in_scope} 問** ({int(progress_percent * 100)}%)")
     st.progress(progress_percent)
 
-# --- 5. 問題セットアップ (前回の修正を維持) ---
+# --- 5. 問題セットアップ (あらゆる形式に対応) ---
 if st.session_state.current_question is None:
     idx = random.choice(target_indices)
     row = df.loc[idx]
     
-    # 2〜5列目を抽出し、記号を排除
     raw_choices = [str(row[2]), str(row[3]), str(row[4]), str(row[5])]
     final_choices = [c for c in raw_choices if c.strip() not in ["ア", "イ", "ウ", "エ"]]
     
     if len(final_choices) < 4:
-        # 記号形式（令和以降）の対応
         final_choices = [str(row[3]), str(row[4]), str(row[5]), str(row[6])]
         symbol_map = {"ア": str(row[3]), "イ": str(row[4]), "ウ": str(row[5]), "エ": str(row[6])}
         correct_ans = symbol_map.get(str(row[2]).strip(), str(row[2]))
-        hint_text = str(row[7])
+        hint_text = str(row[7]) if len(row) > 7 else str(row[6])
     else:
-        # 通常形式の対応
         correct_ans = str(row[2])
         hint_text = str(row[6])
 
