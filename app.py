@@ -1,16 +1,17 @@
 import streamlit as st
 import pandas as pd
 import random
+import re
 
 st.set_page_config(page_title="FE過去問道場（年度選択版）", layout="centered")
 
 def load_data():
-    # 最小修正：header=Noneで1行目も読み込み、namesで列名を固定
+    # 1行目も読み込み、namesで列名を固定
     df = pd.read_csv("questions.csv", header=None, names=[
         'year', 'question_text', 'correct_answer', 
         'choice_a', 'choice_b', 'choice_c', 'choice_d', 'explanation'
     ])
-    df['year_group'] = df['year'].str.extract(r'(令和\d+年|平成\d+年)')
+    df['year_group'] = df['year'].astype(str).str.extract(r'(令和\d+年|平成\d+年)')
     df['year_group'] = df['year_group'].fillna("その他")
     return df
 
@@ -49,11 +50,19 @@ def next_question(filtered_df):
             return
 
     next_idx = random.choice(target_indices)
-    q = df.loc[next_idx] # indexズレを防ぐためlocを使用
+    q = df.loc[next_idx]
     
-    all_choices = {"ア": str(q['choice_a']), "イ": str(q['choice_b']), "ウ": str(q['choice_c']), "エ": str(q['choice_d'])}
+    # 【修正箇所】選択肢の冒頭にある「ア：」「イ．」などを取り除く関数
+    def clean_choice(text):
+        return re.sub(r'^[ア-エ][：:．.\s]+', '', str(text)).strip()
+
+    all_choices = {
+        "ア": clean_choice(q['choice_a']),
+        "イ": clean_choice(q['choice_b']),
+        "ウ": clean_choice(q['choice_c']),
+        "エ": clean_choice(q['choice_d'])
+    }
     
-    # 【最小修正：KeyError対策】正解記号が辞書にあるか確認
     ans_key = str(q['correct_answer']).strip()
     if ans_key in all_choices:
         st.session_state.correct_text = all_choices[ans_key]
@@ -62,10 +71,12 @@ def next_question(filtered_df):
     
     st.session_state.current_question = q
     st.session_state.current_idx = next_idx
+    # 選択肢の表示をシャッフル
     st.session_state.shuffled_texts = random.sample(list(all_choices.values()), len(all_choices))
     st.session_state.show_explanation = False
     st.session_state.user_choice_text = None
 
+# --- サイドバー設定 ---
 st.sidebar.title("🛠️ 設定")
 all_years = sorted(df['year_group'].unique().tolist(), reverse=True)
 selected_years = st.sidebar.multiselect("解きたい年度を選択", options=all_years, default=all_years)
@@ -84,6 +95,7 @@ if st.sidebar.button("学習記録をリセット"):
     st.session_state.current_question = None
     st.rerun()
 
+# --- メインロジック ---
 if not selected_years:
     st.warning("年度を1つ以上選択してください。")
 else:
