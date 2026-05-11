@@ -5,19 +5,16 @@ import random
 st.set_page_config(page_title="FE過去問道場（年度選択版）", layout="centered")
 
 def load_data():
-    # 修正点：header=Noneを追加し、namesで列名を直接指定する（これが最小かつ確実な修正です）
+    # 最小修正：header=Noneで1行目も読み込み、namesで列名を固定
     df = pd.read_csv("questions.csv", header=None, names=[
         'year', 'question_text', 'correct_answer', 
         'choice_a', 'choice_b', 'choice_c', 'choice_d', 'explanation'
     ])
-    # 年度だけを抽出
     df['year_group'] = df['year'].str.extract(r'(令和\d+年|平成\d+年)')
     df['year_group'] = df['year_group'].fillna("その他")
     return df
 
 df = load_data()
-
-# --- これ以降は元のコードと全く同じです ---
 
 if "solved_indices" not in st.session_state:
     st.session_state.solved_indices = []
@@ -32,7 +29,7 @@ def next_question(filtered_df):
     if st.session_state.mode == "復習":
         target_indices = [i for i in filtered_df.index if i in st.session_state.wrong_indices]
         if not target_indices:
-            st.warning("この年度の復習対象（間違えた問題）はありません。通常モードに切り替えます。")
+            st.warning("この年度の復習対象はありません。通常モードに切り替えます。")
             st.session_state.mode = "通常"
             target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
     else:
@@ -40,28 +37,32 @@ def next_question(filtered_df):
 
     if not target_indices:
         if st.session_state.mode == "復習":
-            st.success("復習対象をすべて解きました！通常モードに戻ります。")
+            st.success("復習対象をすべて解きました！")
             st.session_state.mode = "通常"
             st.rerun()
         else:
             st.balloons()
-            st.success("選択した年度の問題をすべて解き終わりました！記録をリセットします。")
+            st.success("全問解き終わりました！記録をリセットします。")
             st.session_state.solved_indices = []
             st.session_state.current_question = None
             st.rerun()
             return
 
     next_idx = random.choice(target_indices)
-    q = df.iloc[next_idx]
+    q = df.loc[next_idx] # indexズレを防ぐためlocを使用
     
     all_choices = {"ア": str(q['choice_a']), "イ": str(q['choice_b']), "ウ": str(q['choice_c']), "エ": str(q['choice_d'])}
-    st.session_state.correct_text = all_choices[q['correct_answer'].strip()]
-    choice_texts = list(all_choices.values())
-    random.shuffle(choice_texts)
+    
+    # 【最小修正：KeyError対策】正解記号が辞書にあるか確認
+    ans_key = str(q['correct_answer']).strip()
+    if ans_key in all_choices:
+        st.session_state.correct_text = all_choices[ans_key]
+    else:
+        st.session_state.correct_text = "正解不明"
     
     st.session_state.current_question = q
     st.session_state.current_idx = next_idx
-    st.session_state.shuffled_texts = choice_texts
+    st.session_state.shuffled_texts = random.sample(list(all_choices.values()), len(all_choices))
     st.session_state.show_explanation = False
     st.session_state.user_choice_text = None
 
@@ -84,7 +85,7 @@ if st.sidebar.button("学習記録をリセット"):
     st.rerun()
 
 if not selected_years:
-    st.warning("サイドバーから年度を1つ以上選択してください。")
+    st.warning("年度を1つ以上選択してください。")
 else:
     if st.session_state.current_question is None or \
        st.session_state.current_question['year_group'] not in selected_years:
