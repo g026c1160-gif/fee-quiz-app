@@ -5,7 +5,7 @@ import random
 # --- 1. データの読み込み ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv('questions.csv', header=None, names=['year_group', 'question', 'ans', 'choice2', 'choice3', 'choice4', 'hint'])
+    df = pd.read_csv('questions.csv', header=None, names=['year_group', 'question', 'ans_key', 'text_a', 'text_i', 'text_u', 'text_e', 'hint'])
     return df
 
 df = load_data()
@@ -47,13 +47,13 @@ filtered_df = df[df['year_group'].isin(selected_years)]
 if selected_mode == "復習":
     target_indices = [i for i in st.session_state.wrong_indices if i in filtered_df.index]
     if not target_indices:
-        st.info("復習対象がありません。")
+        st.info("この年度に復習対象はありません。")
         st.stop()
 else:
     target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
     if not target_indices:
         st.success("全ての対象問題を解き終わりました！")
-        if st.button("リセット"):
+        if st.button("記録をリセット"):
             st.session_state.solved_indices = []
             st.rerun()
         st.stop()
@@ -62,24 +62,20 @@ if st.session_state.current_question is None:
     idx = random.choice(target_indices)
     row = df.loc[idx]
     
-    # 選択肢リストを作成
-    raw_choices = [str(row['ans']), str(row['choice2']), str(row['choice3']), str(row['choice4'])]
+    # 【解決の核】記号と文章をマッピングする
+    # CSVの構成: ans_key(ア), text_a(文章), text_i(文章), text_u(文章), text_e(文章)
+    mapping = {
+        "ア": str(row['text_a']),
+        "イ": str(row['text_i']),
+        "ウ": str(row['text_u']),
+        "エ": str(row['text_e'])
+    }
     
-    # --- 【重要】記号（ア〜エ）を文章に置換する処理 ---
-    # もし正解が「ア」なら、choice2（イにあたる場所）などの内容を正解として扱う
-    mapping = {"ア": 0, "イ": 1, "ウ": 2, "エ": 3}
-    correct_text = raw_choices[0] # デフォルトは一番左
+    # 記号（アなど）から正解の文章を特定
+    correct_text = mapping.get(str(row['ans_key']).strip(), str(row['ans_key']))
     
-    if correct_text in mapping:
-        correct_text = raw_choices[mapping[correct_text]]
-    
-    # 選択肢から記号（ア、イ、ウ、エ）を完全に除去する
-    clean_choices = [c for c in raw_choices if c not in mapping.keys()]
-    
-    # もし除去した結果、選択肢が足りなくなったら元のリストを使う（念のため）
-    if len(clean_choices) < 4:
-        clean_choices = raw_choices
-        
+    # 選択肢リスト（文章のみ）
+    clean_choices = [str(row['text_a']), str(row['text_i']), str(row['text_u']), str(row['text_e'])]
     random.shuffle(clean_choices)
     
     st.session_state.current_question = {
@@ -97,6 +93,7 @@ q = st.session_state.current_question
 st.caption(f"📅 {q['year']} | No.{q['index']}")
 st.markdown(f"### {q['text']}")
 
+# ラジオボタン。keyに問題インデックスを入れて確実にリセット
 answer = st.radio("選択肢を選んでください", q['choices'], key=f"q_{q['index']}")
 
 if st.button("回答する"):
