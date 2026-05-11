@@ -4,6 +4,7 @@ import random
 
 st.set_page_config(page_title="FE過去問道場（完全版）", layout="centered")
 
+# データの読み込み
 def load_data():
     df = pd.read_csv("questions.csv")
     return df
@@ -17,15 +18,14 @@ if "wrong_indices" not in st.session_state:
     st.session_state.wrong_indices = []
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
-if "mode" not in st.session_state:
-    st.session_state.mode = "通常"
-if "show_explanation" not in st.session_state:
-    st.session_state.show_explanation = False
-if "user_answer" not in st.session_state:
-    st.session_state.user_answer = None
+if "shuffled_texts" not in st.session_state:
+    st.session_state.shuffled_texts = [] # シャッフルされた「文章のみ」を保持
+if "correct_text" not in st.session_state:
+    st.session_state.correct_text = "" # 「正解の文章」を保持
 
 def next_question():
-    if st.session_state.mode == "復習":
+    # 問題の選出（通常 or 復習）
+    if st.session_state.get("mode") == "復習":
         target_indices = [i for i in st.session_state.wrong_indices if i not in st.session_state.solved_indices]
         if not target_indices:
             st.session_state.mode = "通常"
@@ -38,57 +38,60 @@ def next_question():
         target_indices = list(df.index)
     
     next_idx = random.choice(target_indices)
-    st.session_state.current_question = df.iloc[next_idx]
+    q = df.iloc[next_idx]
+    
+    # --- 修正の要：文章そのものをリスト化してシャッフル ---
+    all_choices = {
+        "ア": str(q['choice_a']),
+        "イ": str(q['choice_b']),
+        "ウ": str(q['choice_c']),
+        "エ": str(q['choice_d'])
+    }
+    
+    # 正解の「文章」を抜き出しておく
+    correct_label = q['correct_answer'].strip() # 「ア」など
+    st.session_state.correct_text = all_choices[correct_label]
+    
+    # 4つの文章をバラバラにする
+    choice_texts = list(all_choices.values())
+    random.shuffle(choice_texts)
+    
+    st.session_state.current_question = q
     st.session_state.current_idx = next_idx
+    st.session_state.shuffled_texts = choice_texts
     st.session_state.show_explanation = False
-    st.session_state.user_answer = None
+    st.session_state.user_choice_text = None
 
 if st.session_state.current_question is None:
     next_question()
 
 q = st.session_state.current_question
-
-# サイドバー
-st.sidebar.title("設定・記録")
-st.session_state.mode = st.sidebar.radio("モード切替", ["通常", "復習"], index=0 if st.session_state.mode=="通常" else 1)
-st.sidebar.write(f"間違えた問題数: {len(st.session_state.wrong_indices)} 問")
+texts = st.session_state.shuffled_texts
 
 # メイン画面
-st.title(f"🛡️ FE過去問道場")
-st.caption(f"現在のモード: {st.session_state.mode}")
-st.write(f"進捗: **{len(st.session_state.solved_indices)} / {len(df)}** 問完了")
+st.title("🛡️ FE過去問道場")
+st.write(f"進捗: {len(st.session_state.solved_indices)} / {len(df)}")
 
 st.info(f"**{q['year']}**")
 st.subheader(q['question_text'])
 
-# --- 修正ポイント：ボタンの押し分けを確実に取得 ---
+# ボタン表示
 col1, col2 = st.columns(2)
-with col1:
-    if st.button(f"ア：{q['choice_a']}", use_container_width=True):
-        st.session_state.user_answer = "ア"
-        st.session_state.show_explanation = True
-    if st.button(f"ウ：{q['choice_c']}", use_container_width=True):
-        st.session_state.user_answer = "ウ"
-        st.session_state.show_explanation = True
-with col2:
-    if st.button(f"イ：{q['choice_b']}", use_container_width=True):
-        st.session_state.user_answer = "イ"
-        st.session_state.show_explanation = True
-    if st.button(f"エ：{q['choice_d']}", use_container_width=True):
-        st.session_state.user_answer = "エ"
-        st.session_state.show_explanation = True
+for i, t in enumerate(texts):
+    with col1 if i % 2 == 0 else col2:
+        if st.button(t, use_container_width=True, key=f"btn_{i}"):
+            st.session_state.user_choice_text = t
+            st.session_state.show_explanation = True
 
-# 解説と判定
-if st.session_state.show_explanation and st.session_state.user_answer:
+# 判定：選んだボタンの「文章」が「正解の文章」と一致するか
+if st.session_state.show_explanation and st.session_state.user_choice_text:
     st.divider()
-    is_correct = (st.session_state.user_answer == q['correct_answer'])
-    
-    if is_correct:
-        st.success(f"⭕ **正解！**（あなたの回答：{st.session_state.user_answer}）")
+    if st.session_state.user_choice_text == st.session_state.correct_text:
+        st.success("⭕ **正解！**")
         if st.session_state.current_idx in st.session_state.wrong_indices:
             st.session_state.wrong_indices.remove(st.session_state.current_idx)
     else:
-        st.error(f"❌ **不正解...**（正解は「{q['correct_answer']}」でした）")
+        st.error(f"❌ **不正解...** \n\n 正解は: \n **{st.session_state.correct_text}**")
         if st.session_state.current_idx not in st.session_state.wrong_indices:
             st.session_state.wrong_indices.append(st.session_state.current_idx)
 
@@ -101,3 +104,12 @@ if st.session_state.show_explanation and st.session_state.user_answer:
     if st.button("次の問題へ ➡️"):
         next_question()
         st.rerun()
+
+# サイドバー
+st.sidebar.title("設定")
+st.session_state.mode = st.sidebar.radio("モード", ["通常", "復習"])
+if st.sidebar.button("リセット"):
+    st.session_state.solved_indices = []
+    st.session_state.wrong_indices = []
+    next_question()
+    st.rerun()
