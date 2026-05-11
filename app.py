@@ -1,40 +1,59 @@
 import streamlit as st
 import pandas as pd
 import random
+import os
+import glob
 
-# --- 1. データの読み込み ---
-@st.cache_data
-def load_data():
-    df = pd.read_csv('questions.csv', header=None)
-    return df
+# --- 1. データの自動集約読み込み ---
+@st.cache_data(show_spinner=False)
+def load_all_data():
+    # 'data' フォルダ内の全CSVファイルを探す
+    path = "data"
+    if not os.path.exists(path):
+        os.makedirs(path) # フォルダがなければ作成
+        
+    all_files = glob.glob(os.path.join(path, "*.csv"))
+    
+    if not all_files:
+        # ファイルが一つもない場合のダミー
+        return pd.DataFrame([["データなし", "dataフォルダにCSVを入れてください", "A", "B", "C", "D", "ヒント"]])
+    
+    # 全てのCSVを読み込んで一つに結合
+    df_list = []
+    for filename in all_files:
+        # headerなしで読み込み
+        temp_df = pd.read_csv(filename, header=None)
+        df_list.append(temp_df)
+    
+    combined_df = pd.concat(df_list, axis=0, ignore_index=True)
+    return combined_df
 
-df = load_data()
+df = load_all_data()
 
 # --- 2. セッション状態の初期化 ---
-if 'solved_indices' not in st.session_state:
-    st.session_state.solved_indices = []
-if 'wrong_indices' not in st.session_state:
-    st.session_state.wrong_indices = []
-if 'current_question' not in st.session_state:
-    st.session_state.current_question = None
+for key in ['solved_indices', 'wrong_indices', 'current_question']:
+    if key not in st.session_state:
+        st.session_state[key] = [] if 'indices' in key else None
 if 'last_mode' not in st.session_state:
     st.session_state.last_mode = "通常"
 
 # --- 3. サイドバー設定 ---
-st.sidebar.title("🛠️ 設定")
+st.sidebar.title("🛠️ 試験対策設定")
 
+# 読み込まれている年代を自動取得
 all_years = sorted(df[0].unique().tolist(), reverse=True)
-selected_years = st.sidebar.multiselect("解きたい年度を選択", options=all_years, default=all_years)
+selected_years = st.sidebar.multiselect("解きたい年代を選択", options=all_years, default=all_years)
 
 selected_mode = st.sidebar.radio("学習モード", ["通常", "復習"])
 
+# モード切替時のリセット
 if st.session_state.last_mode != selected_mode:
     st.session_state.last_mode = selected_mode
     st.session_state.current_question = None
     st.rerun()
 
-st.sidebar.divider() # 区切り線
-st.sidebar.write(f"📁 現在の復習対象: **{len(st.session_state.wrong_indices)}** 問")
+st.sidebar.divider()
+st.sidebar.write(f"📁 復習対象: **{len(st.session_state.wrong_indices)}** 問")
 
 if st.sidebar.button("学習記録をリセット"):
     st.session_state.solved_indices = []
@@ -42,52 +61,49 @@ if st.sidebar.button("学習記録をリセット"):
     st.session_state.current_question = None
     st.rerun()
 
-# --- 4. 出題ロジック & 進捗計算 ---
+# --- 4. 出題・進捗ロジック ---
 filtered_df = df[df[0].isin(selected_years)]
-total_in_scope = len(filtered_df) # 選択された年度の総問題数
+total_in_scope = len(filtered_df)
 
 if selected_mode == "復習":
     target_indices = [i for i in st.session_state.wrong_indices if i in filtered_df.index]
-    progress_count = len(st.session_state.wrong_indices) # 復習は残り件数
     if not target_indices:
-        st.info("復習対象がありません。")
+        st.info("この条件の復習対象はありません。")
         st.stop()
+    st.write(f"📝 **復習残り: {len(target_indices)} 問**")
 else:
     target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
-    # 現在の進捗（解いた数）
     solved_in_scope = [i for i in st.session_state.solved_indices if i in filtered_df.index]
-    progress_count = len(solved_in_scope)
     
     if not target_indices:
-        st.success("🎉 全ての対象問題を解き終わりました！")
-        if st.button("リセットして最初から"):
+        st.success("🎉 選択した年代の問題をすべて解きました！")
+        if st.button("もう一度最初から"):
             st.session_state.solved_indices = []
             st.rerun()
         st.stop()
 
-# 進捗バーの表示
-if selected_mode == "通常":
-    progress_percent = progress_count / total_in_scope
+    progress_count = len(solved_in_scope)
+    progress_percent = progress_count / total_in_scope if total_in_scope > 0 else 0
     st.write(f"📊 **進捗: {progress_count} / {total_in_scope} 問** ({int(progress_percent * 100)}%)")
     st.progress(progress_percent)
-else:
-    st.write(f"📝 **復習残り: {len(target_indices)} 問**")
 
-# 新しい問題のセット
+# --- 5. 問題セットアップ (前回の修正を維持) ---
 if st.session_state.current_question is None:
     idx = random.choice(target_indices)
     row = df.loc[idx]
     
-    # 選択肢整理（文章のみを抽出）
+    # 2〜5列目を抽出し、記号を排除
     raw_choices = [str(row[2]), str(row[3]), str(row[4]), str(row[5])]
     final_choices = [c for c in raw_choices if c.strip() not in ["ア", "イ", "ウ", "エ"]]
     
     if len(final_choices) < 4:
+        # 記号形式（令和以降）の対応
         final_choices = [str(row[3]), str(row[4]), str(row[5]), str(row[6])]
         symbol_map = {"ア": str(row[3]), "イ": str(row[4]), "ウ": str(row[5]), "エ": str(row[6])}
         correct_ans = symbol_map.get(str(row[2]).strip(), str(row[2]))
         hint_text = str(row[7])
     else:
+        # 通常形式の対応
         correct_ans = str(row[2])
         hint_text = str(row[6])
 
@@ -97,7 +113,7 @@ if st.session_state.current_question is None:
         'correct_ans': correct_ans, 'choices': final_choices, 'hint': hint_text
     }
 
-# --- 5. クイズ画面表示 ---
+# --- 6. クイズ画面表示 ---
 q = st.session_state.current_question
 st.divider()
 st.caption(f"📅 {q['year']} | 管理番号: {q['index']}")
@@ -113,12 +129,10 @@ if st.button("回答する"):
         if q['index'] in st.session_state.wrong_indices:
             st.session_state.wrong_indices.remove(q['index'])
     else:
-        st.error(f"❌ 不正解... 正解は「{q['correct_ans']}」でした。")
+        st.error(f"❌ 不正解... 正解は「{q['correct_ans']}」")
         if q['index'] not in st.session_state.wrong_indices:
             st.session_state.wrong_indices.append(q['index'])
-    
     st.info(f"💡 解説：{q['hint']}")
-    
     if st.button("次の問題へ"):
         st.session_state.current_question = None
         st.rerun()
