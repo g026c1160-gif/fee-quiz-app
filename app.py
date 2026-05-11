@@ -1,12 +1,19 @@
 import streamlit as st
 import pandas as pd
 import random
+import os
 
-st.set_page_config(page_title="FE過去問道場（20問演習版）", layout="centered")
+# ページ設定
+st.set_page_config(page_title="FE過去問道場", layout="centered")
 
 def load_data():
-    # ヘッダーがある前提の読み込み
+    # ファイルの存在確認
+    if not os.path.exists("questions.csv"):
+        st.error("questions.csv が見つかりません。リポジトリにアップロードしてください。")
+        return pd.DataFrame()
+    
     df = pd.read_csv("questions.csv")
+    # 年度抽出（令和・平成）
     df['year_group'] = df['year'].str.extract(r'(令和\d+年|平成\d+年)')
     df['year_group'] = df['year_group'].fillna("その他")
     return df
@@ -15,30 +22,28 @@ df = load_data()
 
 # --- セッション状態の初期化 ---
 if "total_solved" not in st.session_state:
-    st.session_state.total_solved = [] # 全期間を通して正解した問題（通常モードで除外用）
+    st.session_state.total_solved = [] 
 if "wrong_indices" not in st.session_state:
-    st.session_state.wrong_indices = [] # 復習対象（間違えた問題）
+    st.session_state.wrong_indices = [] 
 if "current_set" not in st.session_state:
-    st.session_state.current_set = []   # 現在の20問セット
+    st.session_state.current_set = []   
 if "solved_in_set" not in st.session_state:
-    st.session_state.solved_in_set = [] # 現在のセット内で解き終わったインデックス
+    st.session_state.solved_in_set = [] 
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
 if "mode" not in st.session_state:
     st.session_state.mode = "通常"
 
 def start_new_set(filtered_df):
-    """新しい20問セットを作成する"""
     all_indices = filtered_df.index.tolist()
     
     if st.session_state.mode == "復習":
-        # 復習モード：選択年度の中で、間違えたリストに入っているもの
         target_pool = [i for i in st.session_state.wrong_indices if i in filtered_df.index]
         if not target_pool:
             st.warning("この年度の復習対象（間違えた問題）はありません。")
             return
     else:
-        # 通常モード：選択年度の中で、まだ一度も正解していないもの
+        # 通常モード：一度正解した問題（total_solved）を除外
         target_pool = [i for i in all_indices if i not in st.session_state.total_solved]
         
         if not target_pool:
@@ -46,7 +51,6 @@ def start_new_set(filtered_df):
             st.success("おめでとうございます！選択した年度の全問題を解ききりました！")
             return
 
-    # 最大20問をランダムに抽出
     sample_size = min(20, len(target_pool))
     st.session_state.current_set = random.sample(target_pool, sample_size)
     st.session_state.solved_in_set = []
@@ -54,9 +58,7 @@ def start_new_set(filtered_df):
     next_question()
 
 def next_question():
-    """現在のセットから次の未回答問題を出す"""
     remaining = [i for i in st.session_state.current_set if i not in st.session_state.solved_in_set]
-    
     if not remaining:
         st.session_state.current_question = None
         return
@@ -64,7 +66,6 @@ def next_question():
     next_idx = remaining[0]
     q = df.iloc[next_idx]
     
-    # 選択肢のシャッフル
     all_choices = {"ア": str(q['choice_a']), "イ": str(q['choice_b']), "ウ": str(q['choice_c']), "エ": str(q['choice_d'])}
     st.session_state.correct_text = all_choices[q['correct_answer'].strip()]
     choice_texts = list(all_choices.values())
@@ -76,66 +77,84 @@ def next_question():
     st.session_state.show_explanation = False
     st.session_state.user_choice_text = None
 
-# --- サイドバー設定 ---
+# --- UI構築 ---
 st.sidebar.title("🛠️ 演習設定")
-all_years = sorted(df['year_group'].unique().tolist(), reverse=True)
-selected_years = st.sidebar.multiselect("対象年度を選択", options=all_years, default=all_years)
+if not df.empty:
+    all_years = sorted(df['year_group'].unique().tolist(), reverse=True)
+    selected_years = st.sidebar.multiselect("対象年度を選択", options=all_years, default=all_years)
+    new_mode = st.sidebar.radio("学習モード", ["通常", "復習"])
+    if new_mode != st.session_state.mode:
+        st.session_state.mode = new_mode
+        st.session_state.current_set = []
 
-new_mode = st.sidebar.radio("学習モード", ["通常", "復習"])
-if new_mode != st.session_state.mode:
-    st.session_state.mode = new_mode
-    st.session_state.current_set = [] # モード変更で現在のセットをリセット
+    filtered_df = df[df['year_group'].isin(selected_years)]
 
-filtered_df = df[df['year_group'].isin(selected_years)]
+    if st.sidebar.button("📋 新しい20問セットを開始"):
+        if not filtered_df.empty:
+            start_new_set(filtered_df)
+            st.rerun()
+        else:
+            st.sidebar.error("年度を選択してください")
 
-if st.sidebar.button("📋 新しい20問セットを開始"):
-    if not filtered_df.empty:
-        start_new_set(filtered_df)
+    if st.sidebar.button("🧹 記録をすべてリセット"):
+        st.session_state.total_solved = []
+        st.session_state.wrong_indices = []
+        st.session_state.current_set = []
+        st.session_state.current_question = None
         st.rerun()
+
+    # --- メイン表示 ---
+    st.title("🛡️ FE過去問道場")
+    
+    # 全体進捗
+    total_in_scope = len(filtered_df)
+    solved_in_scope = len([i for i in st.session_state.total_solved if i in filtered_df.index])
+    st.caption(f"現在の選択範囲: 未回答 {total_in_scope - solved_in_scope}問 / 苦手 {len(st.session_state.wrong_indices)}問")
+
+    if not st.session_state.current_set:
+        st.info("サイドバーから条件を設定して、20問演習を開始してください。")
+    elif st.session_state.current_question is None and len(st.session_state.solved_in_set) >= len(st.session_state.current_set):
+        st.balloons()
+        st.success("セット完了！")
+        if st.button("次のセットへ ➡️"):
+            start_new_set(filtered_df)
+            st.rerun()
     else:
-        st.sidebar.error("年度を選択してください")
+        if st.session_state.current_question is None:
+            next_question()
 
-if st.sidebar.button("🧹 記録をすべてリセット"):
-    st.session_state.total_solved = []
-    st.session_state.wrong_indices = []
-    st.session_state.current_set = []
-    st.session_state.current_question = None
-    st.rerun()
+        q = st.session_state.current_question
+        texts = st.session_state.shuffled_texts
 
-# --- メインロジック ---
-st.title("🛡️ FE過去問道場")
+        st.write(f"📊 セット進捗: {len(st.session_state.solved_in_set) + 1} / {len(st.session_state.current_set)}")
+        st.progress(len(st.session_state.solved_in_set) / len(st.session_state.current_set))
 
-# 未回答問題の全体残数を表示
-total_remaining = len(filtered_df) - len([i for i in st.session_state.total_solved if i in filtered_df.index])
-st.caption(f"選択年度の未回答残り: {total_remaining} 問 / 苦手リスト: {len(st.session_state.wrong_indices)} 問")
+        st.info(f"**{q['year']}**")
+        st.subheader(q['question_text'])
 
-if not st.session_state.current_set:
-    st.info("左側のサイドバーから年度を選択し、「新しい20問セットを開始」を押してください。")
+        col1, col2 = st.columns(2)
+        for i, t in enumerate(texts):
+            with col1 if i % 2 == 0 else col2:
+                if st.button(t, use_container_width=True, key=f"btn_{i}", disabled=st.session_state.show_explanation):
+                    st.session_state.user_choice_text = t
+                    st.session_state.show_explanation = True
+                    st.rerun()
 
-elif st.session_state.current_question is None and len(st.session_state.solved_in_set) >= len(st.session_state.current_set):
-    st.balloons()
-    st.success(f"セット完了！ {len(st.session_state.current_set)}問すべて解き終わりました。")
-    if st.button("次の20問へ ➡️"):
-        start_new_set(filtered_df)
-        st.rerun()
+        if st.session_state.show_explanation:
+            st.divider()
+            if st.session_state.user_choice_text == st.session_state.correct_text:
+                st.success("⭕ 正解！")
+                if st.session_state.current_idx not in st.session_state.total_solved:
+                    st.session_state.total_solved.append(st.session_state.current_idx)
+                if st.session_state.current_idx in st.session_state.wrong_indices:
+                    st.session_state.wrong_indices.remove(st.session_state.current_idx)
+            else:
+                st.error(f"❌ 不正解...\n\n正解は: **{st.session_state.correct_text}**")
+                if st.session_state.current_idx not in st.session_state.wrong_indices:
+                    st.session_state.wrong_indices.append(st.session_state.current_idx)
 
-else:
-    # 問題を表示
-    if st.session_state.current_question is None:
-        next_question()
-
-    q = st.session_state.current_question
-    texts = st.session_state.shuffled_texts
-
-    # 進捗表示
-    progress = len(st.session_state.solved_in_set)
-    total = len(st.session_state.current_set)
-    st.write(f"📊 セット内進捗: {progress + 1} / {total}")
-    st.progress((progress) / total)
-
-    st.info(f"**{q['year']}**")
-    st.subheader(q['question_text'])
-
-    col1, col2 = st.columns(2)
-    for i, t in enumerate(texts):
-        with col1 if i % 2 == 0 else col2:
+            st.write(f"**【解説】**\n{q['explanation']}")
+            if st.button("次の問題へ ➡️"):
+                st.session_state.solved_in_set.append(st.session_state.current_idx)
+                next_question()
+                st.rerun()
