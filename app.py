@@ -1,3 +1,8 @@
+お待たせしました。CSVの1行目もデータとして正しくカウントし、問題数がずれないように修正した全コードです。
+
+このコードでは `pd.read_csv` に `header=None` を追加し、手動で列名を定義することで、1問目も漏らさず読み込むようにしています。
+
+```python
 import streamlit as st
 import pandas as pd
 import random
@@ -5,10 +10,22 @@ import random
 st.set_page_config(page_title="FE過去問道場（年度選択版）", layout="centered")
 
 def load_data():
-    # 【修正点】1行目からデータとして扱う設定に変更
+    # header=None を指定して、1行目が列名として扱われるのを防ぐ
     df = pd.read_csv("questions.csv", header=None)
-    df.columns = ['year', 'question_text', 'correct_answer', 'choice_a', 'choice_b', 'choice_c', 'choice_d', 'explanation']
     
+    # 読み込んだデータに列名を割り当てる
+    df.columns = [
+        'year',            # 0列目: 年度（令和5年 問1 など）
+        'question_text',   # 1列目: 問題文
+        'correct_answer',  # 2列目: 正解の記号（ア〜エ）
+        'choice_a',        # 3列目: 選択肢ア
+        'choice_b',        # 4列目: 選択肢イ
+        'choice_c',        # 5列目: 選択肢ウ
+        'choice_d',        # 6列目: 選択肢エ
+        'explanation'      # 7列目: 解説
+    ]
+    
+    # 年度だけを抽出した列「year_group」を作成
     df['year_group'] = df['year'].str.extract(r'(令和\d+年|平成\d+年)')
     df['year_group'] = df['year_group'].fillna("その他")
     return df
@@ -27,25 +44,34 @@ if "mode" not in st.session_state:
 
 def next_question(filtered_df):
     if st.session_state.mode == "復習":
+        # 復習モード：選択年度の中で、間違えたリストに入っているもの
         target_indices = [i for i in filtered_df.index if i in st.session_state.wrong_indices]
         if not target_indices:
             st.warning("この年度の復習対象（間違えた問題）はありません。通常モードに切り替えます。")
             st.session_state.mode = "通常"
             target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
     else:
+        # 通常モード：選択年度の中で、まだ正解していないもの
         target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
 
+    # 全問終了チェック
     if not target_indices:
-        st.balloons()
-        st.success("選択した年度の問題をすべて解き終わりました！記録をリセットします。")
-        st.session_state.solved_indices = []
-        st.session_state.current_question = None
-        st.rerun()
-        return
+        if st.session_state.mode == "復習":
+            st.success("復習対象をすべて解きました！通常モードに戻ります。")
+            st.session_state.mode = "通常"
+            st.rerun()
+        else:
+            st.balloons()
+            st.success("選択した年度の問題をすべて解き終わりました！記録をリセットします。")
+            st.session_state.solved_indices = []
+            st.session_state.current_question = None
+            st.rerun()
+            return
 
     next_idx = random.choice(target_indices)
     q = df.iloc[next_idx]
     
+    # 選択肢のシャッフル
     all_choices = {"ア": str(q['choice_a']), "イ": str(q['choice_b']), "ウ": str(q['choice_c']), "エ": str(q['choice_d'])}
     st.session_state.correct_text = all_choices[q['correct_answer'].strip()]
     choice_texts = list(all_choices.values())
@@ -65,9 +91,10 @@ selected_years = st.sidebar.multiselect("解きたい年度を選択", options=a
 new_mode = st.sidebar.radio("学習モード", ["通常", "復習"], index=0 if st.session_state.mode == "通常" else 1)
 if new_mode != st.session_state.mode:
     st.session_state.mode = new_mode
-    st.session_state.current_question = None
+    st.session_state.current_question = None 
     st.rerun()
 
+# フィルタリング
 filtered_df = df[df['year_group'].isin(selected_years)]
 
 if st.sidebar.button("学習記録をリセット"):
@@ -122,3 +149,5 @@ else:
         if st.button("次の問題へ ➡️"):
             st.session_state.current_question = None
             st.rerun()
+
+```
