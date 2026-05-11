@@ -1,127 +1,114 @@
 import streamlit as st
 import pandas as pd
 import random
-import os
-import glob
-import re
 
-# --- 1. データの自動集約読み込み ---
-@st.cache_data(show_spinner=False, ttl=60) 
-def load_all_data():
-    df_list = []
-    # 既存の全CSVを読み込み
-    files = glob.glob("*.csv") + glob.glob("data/*.csv")
-    for f in set(files):
-        try:
-            tmp = pd.read_csv(f, header=None).dropna(how='all')
-            df_list.append(tmp)
-        except: pass
-    
-    if not df_list:
-        return pd.DataFrame([["設定中", "問題なし", "A", "B", "C", "D", "ヒント"]])
-    
-    # 結合して重複排除
-    df = pd.concat(df_list, axis=0, ignore_index=True).drop_duplicates()
+st.set_page_config(page_title="FE過去問道場（年度選択版）", layout="centered")
 
-    # 年度ラベルの抽出（「令和3年」や「令和4年」だけを抜き出す）
-    def extract_year(text):
-        match = re.search(r'(令和\d+年|平成\d+年)', str(text))
-        return match.group(0) if match else "その他"
-
-    df['year_label'] = df[0].apply(extract_year)
+def load_data():
+    df = pd.read_csv("questions.csv")
+    # 年度だけを抽出した列「year_group」を作成（令和5年 問1 → 令和5年）
+    df['year_group'] = df['year'].str.extract(r'(令和\d+年)')
     return df
 
-st.cache_data.clear()
-df = load_all_data()
+df = load_data()
 
-# --- 2. セッション状態の初期化 ---
-if 'solved_indices' not in st.session_state:
+# セッション状態の初期化
+if "solved_indices" not in st.session_state:
     st.session_state.solved_indices = []
-if 'wrong_indices' not in st.session_state:
+if "wrong_indices" not in st.session_state:
     st.session_state.wrong_indices = []
-if 'current_question' not in st.session_state:
+if "current_question" not in st.session_state:
     st.session_state.current_question = None
-if 'last_selected_years' not in st.session_state:
-    st.session_state.last_selected_years = []
+if "selected_years" not in st.session_state:
+    st.session_state.selected_years = []
 
-# --- 3. サイドバー設定 ---
-st.sidebar.title("🛠️ 試験対策設定")
+def next_question(filtered_df):
+    # フィルタリング後の問題から、まだ解いていないものを選ぶ
+    target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
 
-# 正確な年度ごとのユニークな問題数をカウント
-year_counts = df['year_label'].value_counts()
-unique_years = sorted(year_counts.index.tolist(), reverse=True)
-year_options = [f"{y} ({year_counts[y]}問)" for y in unique_years]
-year_map = {f"{y} ({year_counts[y]}問)": y for y in unique_years}
+    # 復習モードの場合、フィルタリング後の問題 ∩ 間違えた問題
+    if st.session_state.get("mode") == "復習":
+        target_indices = [i for i in target_indices if i in st.session_state.wrong_indices]
+        if not target_indices:
+            st.warning("この年度の復習対象の問題はありません。通常モードの問題を表示します。")
+            target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
 
-selected_options = st.sidebar.multiselect("年度を選択", options=year_options, default=year_options)
-selected_years = [year_map[opt] for opt in selected_options]
+    if not target_indices:
+        st.balloons()
+        st.success("選択した年度の問題をすべて解き終わりました！記録をリセットします。")
+        st.session_state.solved_indices = []
+        target_indices = list(filtered_df.index)
+    
+    next_idx = random.choice(target_indices)
+    q = df.iloc[next_idx]
+    
+    # 選択肢のシャッフル
+    all_choices = {"ア": str(q['choice_a']), "イ": str(q['choice_b']), "ウ": str(q['choice_c']), "エ": str(q['choice_d'])}
+    st.session_state.correct_text = all_choices[q['correct_answer'].strip()]
+    choice_texts = list(all_choices.values())
+    random.shuffle(choice_texts)
+    
+    st.session_state.current_question = q
+    st.session_state.current_idx = next_idx
+    st.session_state.shuffled_texts = choice_texts
+    st.session_state.show_explanation = False
+    st.session_state.user_choice_text = None
 
-# 選択が変わったらリセット
-if st.session_state.last_selected_years != selected_years:
-    st.session_state.last_selected_years = selected_years
-    st.session_state.current_question = None
-    st.rerun()
+# --- サイドバー設定 ---
+st.sidebar.title("🛠️ 設定")
+all_years = sorted(df['year_group'].unique().tolist(), reverse=True)
+selected_years = st.sidebar.multiselect("解きたい年度を選択", options=all_years, default=all_years)
+
+st.session_state.mode = st.sidebar.radio("学習モード", ["通常", "復習"])
+
+# 選択された年度でフィルタリング
+filtered_df = df[df['year_group'].isin(selected_years)]
 
 if st.sidebar.button("学習記録をリセット"):
     st.session_state.solved_indices = []
     st.session_state.wrong_indices = []
-    st.session_state.current_question = None
     st.rerun()
 
-# --- 4. 出題・進捗ロジック ---
-filtered_df = df[df['year_label'].isin(selected_years)]
-target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
+# --- メインロジック ---
+if not selected_years:
+    st.warning("サイドバーから年度を1つ以上選択してください。")
+else:
+    if st.session_state.current_question is None or \
+       st.session_state.current_question['year_group'] not in selected_years:
+        next_question(filtered_df)
 
-if not target_indices:
-    st.success("🎉 選択した年度の問題をすべて解きました！")
-    st.stop()
+    q = st.session_state.current_question
+    texts = st.session_state.shuffled_texts
 
-# --- 5. 問題のセットアップ (解説・選択肢のズレを徹底修正) ---
-if st.session_state.current_question is None:
-    idx = random.choice(target_indices)
-    row = df.loc[idx].values.tolist()
+    st.title("🛡️ FE過去問道場")
+    st.write(f"進捗: {len(st.session_state.solved_indices)} / {len(filtered_df)} 問完了 (選択年度内)")
     
-    # 1. 選択肢の抽出 (2列目以降から、年度ラベルや空データを除外した純粋なリストを作る)
-    # row[0]:管理番号, row[1]:問題文, row[2]:正解/記号, row[3...]:選択肢...
-    
-    ans_col_val = str(row[2]).strip()
-    if ans_col_val in ["ア", "イ", "ウ", "エ"]:
-        # 記号形式: [ア, 文, 文, 文, 文]
-        symbol_idx = {"ア": 3, "イ": 4, "ウ": 5, "エ": 6}
-        correct_ans = str(row[symbol_idx[ans_col_val]])
-        choices = [str(row[3]), str(row[4]), str(row[5]), str(row[6])]
-    else:
-        # 文章形式: [正解文, 誤1, 誤2, 誤3]
-        correct_ans = str(row[2])
-        choices = [str(row[2]), str(row[3]), str(row[4]), str(row[5])]
-    
-    # 2. 解説の抽出 (データの末尾から「year_label」を除いた最後の有効な値を採用)
-    valid_items = [x for x in row if pd.notna(x) and str(x).strip() != ""]
-    # 最後の1つは year_label なので、その前が解説
-    hint_text = valid_items[-2] if len(valid_items) > 2 else "解説はありません。"
+    st.info(f"**{q['year']}**")
+    st.subheader(q['question_text'])
 
-    random.shuffle(choices)
-    st.session_state.current_question = {
-        'index': idx, 'year': row[0], 'text': row[1],
-        'correct_ans': correct_ans, 'choices': choices, 'hint': hint_text
-    }
+    col1, col2 = st.columns(2)
+    for i, t in enumerate(texts):
+        with col1 if i % 2 == 0 else col2:
+            if st.button(t, use_container_width=True, key=f"btn_{i}"):
+                st.session_state.user_choice_text = t
+                st.session_state.show_explanation = True
 
-# --- 6. クイズ画面表示 ---
-q = st.session_state.current_question
-st.divider()
-st.caption(f"📅 {q['year']}")
-st.markdown(f"### {q['text']}")
+    if st.session_state.show_explanation and st.session_state.user_choice_text:
+        st.divider()
+        if st.session_state.user_choice_text == st.session_state.correct_text:
+            st.success("⭕ **正解！**")
+            if st.session_state.current_idx in st.session_state.wrong_indices:
+                st.session_state.wrong_indices.remove(st.session_state.current_idx)
+        else:
+            st.error(f"❌ **不正解...** \n\n 正解は: \n **{st.session_state.correct_text}**")
+            if st.session_state.current_idx not in st.session_state.wrong_indices:
+                st.session_state.wrong_indices.append(st.session_state.current_idx)
 
-answer = st.radio("選択肢を選んでください", q['choices'], key=f"q_{q['index']}")
+        if st.session_state.current_idx not in st.session_state.solved_indices:
+            st.session_state.solved_indices.append(st.session_state.current_idx)
 
-if st.button("回答する"):
-    if answer == q['correct_ans']:
-        st.success("✨ 正解！")
-        st.session_state.solved_indices.append(q['index'])
-    else:
-        st.error(f"❌ 不正解... 正解は「{q['correct_ans']}」")
-    
-    st.info(f"💡 解説：{q['hint']}")
-    if st.button("次の問題へ"):
-        st.session_state.current_question = None
-        st.rerun()
+        st.write(f"**【解説】**\n{q['explanation']}")
+        
+        if st.button("次の問題へ ➡️"):
+            next_question(filtered_df)
+            st.rerun()
