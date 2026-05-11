@@ -139,4 +139,3 @@ else:
     col1, col2 = st.columns(2)
     for i, t in enumerate(texts):
         with col1 if i % 2 == 0 else col2:
-            # すでに回答済
