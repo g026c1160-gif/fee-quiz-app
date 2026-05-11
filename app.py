@@ -5,7 +5,8 @@ import random
 # --- 1. データの読み込み ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv('questions.csv', header=None, names=['year_group', 'question', 'ans_key', 'text_a', 'text_i', 'text_u', 'text_e', 'hint'])
+    # 列名を固定せず、順番（インデックス）で制御します
+    df = pd.read_csv('questions.csv', header=None)
     return df
 
 df = load_data()
@@ -23,7 +24,8 @@ if 'last_mode' not in st.session_state:
 # --- 3. サイドバー設定 ---
 st.sidebar.title("🛠️ 設定")
 
-all_years = sorted(df['year_group'].unique().tolist(), reverse=True)
+# 年度（0番目の列）を取得
+all_years = sorted(df[0].unique().tolist(), reverse=True)
 selected_years = st.sidebar.multiselect("解きたい年度を選択", options=all_years, default=all_years)
 
 selected_mode = st.sidebar.radio("学習モード", ["通常", "復習"])
@@ -42,18 +44,19 @@ if st.sidebar.button("学習記録をリセット"):
     st.rerun()
 
 # --- 4. 出題ロジック ---
-filtered_df = df[df['year_group'].isin(selected_years)]
+# 年度でフィルタリング
+filtered_df = df[df[0].isin(selected_years)]
 
 if selected_mode == "復習":
     target_indices = [i for i in st.session_state.wrong_indices if i in filtered_df.index]
     if not target_indices:
-        st.info("この年度に復習対象はありません。")
+        st.info("復習対象がありません。")
         st.stop()
 else:
     target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
     if not target_indices:
         st.success("全ての対象問題を解き終わりました！")
-        if st.button("記録をリセット"):
+        if st.button("リセット"):
             st.session_state.solved_indices = []
             st.rerun()
         st.stop()
@@ -62,29 +65,42 @@ if st.session_state.current_question is None:
     idx = random.choice(target_indices)
     row = df.loc[idx]
     
-    # 【解決の核】記号と文章をマッピングする
-    # CSVの構成: ans_key(ア), text_a(文章), text_i(文章), text_u(文章), text_e(文章)
-    mapping = {
-        "ア": str(row['text_a']),
-        "イ": str(row['text_i']),
-        "ウ": str(row['text_u']),
-        "エ": str(row['text_e'])
-    }
+    # 【最重要】CSVの列順に基づいてデータを整理
+    # 0:年度, 1:問題文, 2:正解(文または記号), 3:選択2, 4:選択3, 5:選択4, 6:解説
     
-    # 記号（アなど）から正解の文章を特定
-    correct_text = mapping.get(str(row['ans_key']).strip(), str(row['ans_key']))
+    # 選択肢の文章だけをリスト化（2〜5列目）
+    raw_choices = [str(row[2]), str(row[3]), str(row[4]), str(row[5])]
     
-    # 選択肢リスト（文章のみ）
-    clean_choices = [str(row['text_a']), str(row['text_i']), str(row['text_u']), str(row['text_e'])]
-    random.shuffle(clean_choices)
+    # もし2列目が「ア」「イ」「ウ」「エ」なら、文章へのマッピングを行う
+    mapping = {"ア": 3, "イ": 4, "ウ": 5, "エ": 6} 
+    # ※記号形式のCSVの場合、3列目以降に文章がずれている可能性があるための処理
+    
+    correct_ans = str(row[2])
+    # 選択肢の中に「ア」などが一文字で存在する場合のみ、それは無視して文章を選ぶ
+    final_choices = []
+    for c in raw_choices:
+        if c.strip() not in ["ア", "イ", "ウ", "エ"]:
+            final_choices.append(c)
+    
+    # もし文章が足りない（2列目が記号だった）場合は、3〜6列目から文章を取る
+    if len(final_choices) < 4:
+        final_choices = [str(row[3]), str(row[4]), str(row[5]), str(row[6])]
+        # 正解を記号から文章に変換
+        symbol_map = {"ア": str(row[3]), "イ": str(row[4]), "ウ": str(row[5]), "エ": str(row[6])}
+        correct_ans = symbol_map.get(str(row[2]).strip(), str(row[2]))
+        hint_text = str(row[7]) # ずれている場合は7列目が解説
+    else:
+        hint_text = str(row[6]) # 通常は6列目が解説
+
+    random.shuffle(final_choices)
     
     st.session_state.current_question = {
         'index': idx,
-        'year': row['year_group'],
-        'text': row['question'],
-        'correct_ans': correct_text,
-        'choices': clean_choices,
-        'hint': row['hint']
+        'year': row[0],
+        'text': row[1],
+        'correct_ans': correct_ans,
+        'choices': final_choices,
+        'hint': hint_text
     }
 
 # --- 5. クイズ画面表示 ---
@@ -93,7 +109,6 @@ q = st.session_state.current_question
 st.caption(f"📅 {q['year']} | No.{q['index']}")
 st.markdown(f"### {q['text']}")
 
-# ラジオボタン。keyに問題インデックスを入れて確実にリセット
 answer = st.radio("選択肢を選んでください", q['choices'], key=f"q_{q['index']}")
 
 if st.button("回答する"):
