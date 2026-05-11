@@ -1,114 +1,46 @@
-import streamlit as st
-import pandas as pd
-import random
-
-st.set_page_config(page_title="FE過去問道場（年度選択版）", layout="centered")
-
-def load_data():
-    df = pd.read_csv("questions.csv")
-    # 年度だけを抽出した列「year_group」を作成（令和5年 問1 → 令和5年）
-    df['year_group'] = df['year'].str.extract(r'(令和\d+年)')
-    return df
-
-df = load_data()
-
-# セッション状態の初期化
-if "solved_indices" not in st.session_state:
-    st.session_state.solved_indices = []
-if "wrong_indices" not in st.session_state:
-    st.session_state.wrong_indices = []
-if "current_question" not in st.session_state:
-    st.session_state.current_question = None
-if "selected_years" not in st.session_state:
-    st.session_state.selected_years = []
-
-def next_question(filtered_df):
-    # フィルタリング後の問題から、まだ解いていないものを選ぶ
-    target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
-
-    # 復習モードの場合、フィルタリング後の問題 ∩ 間違えた問題
-    if st.session_state.get("mode") == "復習":
-        target_indices = [i for i in target_indices if i in st.session_state.wrong_indices]
-        if not target_indices:
-            st.warning("この年度の復習対象の問題はありません。通常モードの問題を表示します。")
-            target_indices = [i for i in filtered_df.index if i not in st.session_state.solved_indices]
-
-    if not target_indices:
-        st.balloons()
-        st.success("選択した年度の問題をすべて解き終わりました！記録をリセットします。")
-        st.session_state.solved_indices = []
-        target_indices = list(filtered_df.index)
-    
-    next_idx = random.choice(target_indices)
-    q = df.iloc[next_idx]
-    
-    # 選択肢のシャッフル
-    all_choices = {"ア": str(q['choice_a']), "イ": str(q['choice_b']), "ウ": str(q['choice_c']), "エ": str(q['choice_d'])}
-    st.session_state.correct_text = all_choices[q['correct_answer'].strip()]
-    choice_texts = list(all_choices.values())
-    random.shuffle(choice_texts)
-    
-    st.session_state.current_question = q
-    st.session_state.current_idx = next_idx
-    st.session_state.shuffled_texts = choice_texts
-    st.session_state.show_explanation = False
-    st.session_state.user_choice_text = None
-
-# --- サイドバー設定 ---
+# --- サイドバー設定（ここを微調整） ---
 st.sidebar.title("🛠️ 設定")
+
+# 1. 年度選択
 all_years = sorted(df['year_group'].unique().tolist(), reverse=True)
 selected_years = st.sidebar.multiselect("解きたい年度を選択", options=all_years, default=all_years)
 
-st.session_state.mode = st.sidebar.radio("学習モード", ["通常", "復習"])
+# 2. 学習モード選択
+# モードを変えたときに現在の問題をリセットする仕組み
+selected_mode = st.sidebar.radio("学習モード", ["通常", "復習"])
 
-# 選択された年度でフィルタリング
-filtered_df = df[df['year_group'].isin(selected_years)]
+# モードが切り替わったら現在の問題をリセットして次にいく
+if "last_mode" not in st.session_state:
+    st.session_state.last_mode = selected_mode
+
+if st.session_state.last_mode != selected_mode:
+    st.session_state.last_mode = selected_mode
+    st.session_state.current_question = None
+    st.rerun()
+
+st.session_state.mode = selected_mode
+
+# 3. 復習対象の件数を表示（やる気を出すため！）
+wrong_count = len(st.session_state.wrong_indices)
+st.sidebar.write(f"現在の復習対象: **{wrong_count}** 問")
 
 if st.sidebar.button("学習記録をリセット"):
     st.session_state.solved_indices = []
     st.session_state.wrong_indices = []
+    st.session_state.current_question = None
     st.rerun()
 
-# --- メインロジック ---
-if not selected_years:
-    st.warning("サイドバーから年度を1つ以上選択してください。")
-else:
-    if st.session_state.current_question is None or \
-       st.session_state.current_question['year_group'] not in selected_years:
-        next_question(filtered_df)
+# --- フィルタリングロジック（ここも重要） ---
+filtered_df = df[df['year_group'].isin(selected_years)]
 
-    q = st.session_state.current_question
-    texts = st.session_state.shuffled_texts
-
-    st.title("🛡️ FE過去問道場")
-    st.write(f"進捗: {len(st.session_state.solved_indices)} / {len(filtered_df)} 問完了 (選択年度内)")
+# 復習モードのときは「間違えた問題」かつ「選択された年度」に絞る
+if st.session_state.mode == "復習":
+    # 全データの中から間違えたインデックス、かつ選択年度に含まれるもの
+    current_wrong_indices = [i for i in st.session_state.wrong_indices if i in filtered_df.index]
     
-    st.info(f"**{q['year']}**")
-    st.subheader(q['question_text'])
-
-    col1, col2 = st.columns(2)
-    for i, t in enumerate(texts):
-        with col1 if i % 2 == 0 else col2:
-            if st.button(t, use_container_width=True, key=f"btn_{i}"):
-                st.session_state.user_choice_text = t
-                st.session_state.show_explanation = True
-
-    if st.session_state.show_explanation and st.session_state.user_choice_text:
-        st.divider()
-        if st.session_state.user_choice_text == st.session_state.correct_text:
-            st.success("⭕ **正解！**")
-            if st.session_state.current_idx in st.session_state.wrong_indices:
-                st.session_state.wrong_indices.remove(st.session_state.current_idx)
-        else:
-            st.error(f"❌ **不正解...** \n\n 正解は: \n **{st.session_state.correct_text}**")
-            if st.session_state.current_idx not in st.session_state.wrong_indices:
-                st.session_state.wrong_indices.append(st.session_state.current_idx)
-
-        if st.session_state.current_idx not in st.session_state.solved_indices:
-            st.session_state.solved_indices.append(st.session_state.current_idx)
-
-        st.write(f"**【解説】**\n{q['explanation']}")
-        
-        if st.button("次の問題へ ➡️"):
-            next_question(filtered_df)
-            st.rerun()
+    if not current_wrong_indices:
+        st.sidebar.warning("⚠️ 選択年度に復習対象がありません")
+        # 復習対象がない場合は強制的に通常モードの動きにするか、警告を出す
+    else:
+        # 復習モード用の表示フィルタ
+        filtered_df = df.loc[current_wrong_indices]
